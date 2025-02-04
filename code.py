@@ -5,8 +5,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 import math 
+import hashlib
 
-# st.set_page_config(page_title="Inventory Management Dashboard", layout="wide")
 
 def read_sales_data(uploaded_file, sheet_name):
     df = pd.read_excel(uploaded_file, sheet_name=sheet_name)
@@ -89,7 +89,7 @@ def shipment_inventory_status(inventory_data, drr_data):
     df2 = drr_data
 
     df = pd.merge(df1, df2, on=['ASIN', 'Product Name'], how='inner')
-    df = df.drop(columns=['Upcoming Inventory', 'Total Inventory', 'Target_DRR', 'Sales', 'Gross Profit'], errors='ignore')
+    df = df.drop(columns=['Upcoming Inventory', 'Total Inventory', 'Sales', 'Gross Profit'], errors='ignore')
 
     def format_column(column):
         if isinstance(column, datetime):
@@ -185,6 +185,7 @@ def shipment_inventory_status(inventory_data, drr_data):
             'Current Inventory': row["Current inventory"],
             'Updated Current Inventory': updated_inventory,
             'Daily_Run_Rate': Daily_Run_Rate,
+            
             'Date of OOS': out_of_stock_date.strftime("%d-%m-%Y") if isinstance(out_of_stock_date, datetime) else out_of_stock_date,
             'Expected Date to be in Air': expected_date_to_be_in_air.strftime("%d-%m-%Y") if isinstance(expected_date_to_be_in_air, datetime) else expected_date_to_be_in_air,
             'Days of inventory': (out_of_stock_date - datetime.today()).days if isinstance(out_of_stock_date, datetime) else "N/A",
@@ -595,7 +596,138 @@ def read_labels_data(uploaded_file, sheet_name):
     df = pd.read_excel(uploaded_file, sheet_name=sheet_name)
     
     return df
-        
+
+def init_users():
+    if 'users' not in st.session_state:
+        st.session_state.users = {
+            'User Harsh': {
+                'password': hashlib.sha256('9838'.encode()).hexdigest(),
+                'role': 'Admin',
+                'permissions': ['overview', 'inventory_status', 'shipment_planning', 'loss_analysis', 
+                 'profit_analysis', 'max_drr', 'drr_timeline', 'labels', 'manage_users']
+            }
+        }
+
+def get_role_permissions():
+    return {
+        'Admin': ['overview', 'inventory_status', 'shipment_planning', 'loss_analysis', 
+                 'profit_analysis', 'max_drr', 'drr_timeline', 'labels', 'manage_users'],
+        'admin': ['overview', 'inventory_status', 'shipment_planning', 'loss_analysis', 
+                 'profit_analysis', 'max_drr', 'drr_timeline', 'labels'],
+        'inventory': ['overview', 'inventory_status', 'shipment_planning', 'max_drr', 'drr_timeline'],
+        'Labels': ['overview', 'labels'],
+        'viewer': ['overview']
+    }
+
+def add_user(username, password, role):
+    if username in st.session_state.users:
+        return False, "Username already exists"
+    
+    st.session_state.users[username] = {
+        'password': hashlib.sha256(password.encode()).hexdigest(),
+        'role': role,
+        'permissions': get_role_permissions()[role]
+    }
+    return True, "User added successfully"
+
+def remove_user(username):
+    if username == 'User Harsh':
+        return False, "Cannot remove admin user"
+    if username in st.session_state.users:
+        del st.session_state.users[username]
+        return True, "User removed successfully"
+    return False, "User not found"
+
+def update_user_role(username, new_role):
+    if username == 'User Harsh':
+        return False, "Cannot modify admin role"
+    if username in st.session_state.users:
+        st.session_state.users[username]['role'] = new_role
+        st.session_state.users[username]['permissions'] = get_role_permissions()[new_role]
+        return True, "Role updated successfully"
+    return False, "User not found"
+
+def check_password():
+    init_users()
+    
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if not st.session_state.authenticated:
+        st.title("Login")
+        col1, col2 = st.columns(2)
+        with col1:
+            username = st.text_input("Username")
+        with col2:
+            password = st.text_input("Password", type="password")
+
+        if st.button("Login"):
+            if username in st.session_state.users and \
+               st.session_state.users[username]['password'] == hashlib.sha256(password.encode()).hexdigest():
+                st.session_state.authenticated = True
+                st.session_state.current_user = username
+                st.session_state.current_role = st.session_state.users[username]['role']
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
+        return False
+
+    return True
+
+def user_management():
+    if st.session_state.current_user != 'User Harsh':
+        st.warning("Only admin can manage users")
+        return
+
+    st.subheader("User Management")
+    
+    tab1, tab2, tab3 = st.tabs(["Add User", "Remove User", "Update Role"])
+    
+    with tab1:
+        new_username = st.text_input("New Username")
+        new_password = st.text_input("New Password", type="password")
+        new_role = st.selectbox("Select Role", options=list(get_role_permissions().keys()))
+        if st.button("Add User"):
+            success, message = add_user(new_username, new_password, new_role)
+            if success:
+                st.success(message)
+            else:
+                st.error(message)
+
+    with tab2:
+        username_to_remove = st.selectbox("Select User to Remove", 
+                                        options=[u for u in st.session_state.users.keys() if u != 'User Harsh'])
+        if st.button("Remove User"):
+            success, message = remove_user(username_to_remove)
+            if success:
+                st.success(message)
+            else:
+                st.error(message)
+
+    with tab3:
+        username_to_update = st.selectbox("Select User to Update", 
+                                        options=[u for u in st.session_state.users.keys() if u != 'User Harsh'])
+        new_role = st.selectbox("Select New Role", 
+                               options=list(get_role_permissions().keys()),
+                               key="update_role")
+        if st.button("Update Role"):
+            success, message = update_user_role(username_to_update, new_role)
+            if success:
+                st.success(message)
+            else:
+                st.error(message)
+
+    st.write("Current Users:")
+    user_list = pd.DataFrame(
+        [(user, data['role'], ', '.join(data['permissions'])) 
+         for user, data in st.session_state.users.items()],
+        columns=["Username", "Role", "Permissions"]
+    )
+    st.dataframe(user_list)
+
+def has_permission(permission):
+    return permission in st.session_state.users[st.session_state.current_user]['permissions']
+
 
 import streamlit as st
 import pandas as pd
@@ -623,6 +755,26 @@ def main():
             .status-good {color: green;}
         </style>
     """, unsafe_allow_html=True)
+    if not check_password():
+        return
+
+    st.sidebar.title(f"Welcome, {st.session_state.current_user}")
+    st.sidebar.write(f"Role: {st.session_state.current_role}")
+    
+    if st.sidebar.button("Logout"):
+        st.session_state.authenticated = False
+        st.rerun()
+
+    if st.session_state.current_user == 'User Harsh':
+        if st.sidebar.button("Manage Users"):
+            st.session_state.show_user_management = True
+        
+    if st.session_state.get('show_user_management', False):
+        user_management()
+        if st.button("Back to Dashboard"):
+            st.session_state.show_user_management = False
+            st.rerun()
+        return
 
     st.title("Inventory Management Dashboard")
 
