@@ -7,6 +7,7 @@ import numpy as np
 import math 
 import hashlib
 
+# st.set_page_config(page_title="Inventory Management Dashboard", layout="wide")
 
 def read_sales_data(uploaded_file, sheet_name):
     df = pd.read_excel(uploaded_file, sheet_name=sheet_name)
@@ -485,11 +486,11 @@ def calculate_max_drr_with_push_drr(inventory_data, target_date, future_date, ma
             'ASIN': row.get('ASIN', 'N/A'),
             'Current Inventory': initial_inventory,
             'Max DRR': max_drr,
-            'Ending Inventory': best_ending_inventory,
+            # 'Ending Inventory': best_ending_inventory,
             'Total Shipments Before Future': shipments_before_future,
             'Total Shipments After Future': shipments_after_future,
-            'Manual DRR Used': manual_drr if manual_drr is not None else 'No',
-            'Calculation Start Date': calc_start_date
+            # 'Manual DRR Used': manual_drr if manual_drr is not None else 'No',
+            # 'Calculation Start Date': calc_start_date
         })
     
     return pd.DataFrame(results)
@@ -594,13 +595,12 @@ def calculate_daily_drr(file_path, sheet_name, target_date):
 
 def read_labels_data(uploaded_file, sheet_name):
     df = pd.read_excel(uploaded_file, sheet_name=sheet_name)
-    
     return df
-
+    
 def init_users():
     if 'users' not in st.session_state:
         st.session_state.users = {
-            'User Harsh': {
+            'Harsh': {
                 'password': hashlib.sha256('9838'.encode()).hexdigest(),
                 'role': 'Admin',
                 'permissions': ['overview', 'inventory_status', 'shipment_planning', 'loss_analysis', 
@@ -631,7 +631,7 @@ def add_user(username, password, role):
     return True, "User added successfully"
 
 def remove_user(username):
-    if username == 'User Harsh':
+    if username == 'Harsh':
         return False, "Cannot remove admin user"
     if username in st.session_state.users:
         del st.session_state.users[username]
@@ -639,7 +639,7 @@ def remove_user(username):
     return False, "User not found"
 
 def update_user_role(username, new_role):
-    if username == 'User Harsh':
+    if username == 'Harsh':
         return False, "Cannot modify admin role"
     if username in st.session_state.users:
         st.session_state.users[username]['role'] = new_role
@@ -675,7 +675,7 @@ def check_password():
     return True
 
 def user_management():
-    if st.session_state.current_user != 'User Harsh':
+    if st.session_state.current_user != 'Harsh':
         st.warning("Only admin can manage users")
         return
 
@@ -696,7 +696,7 @@ def user_management():
 
     with tab2:
         username_to_remove = st.selectbox("Select User to Remove", 
-                                        options=[u for u in st.session_state.users.keys() if u != 'User Harsh'])
+                                        options=[u for u in st.session_state.users.keys() if u != 'Harsh'])
         if st.button("Remove User"):
             success, message = remove_user(username_to_remove)
             if success:
@@ -706,7 +706,7 @@ def user_management():
 
     with tab3:
         username_to_update = st.selectbox("Select User to Update", 
-                                        options=[u for u in st.session_state.users.keys() if u != 'User Harsh'])
+                                        options=[u for u in st.session_state.users.keys() if u != 'Harsh'])
         new_role = st.selectbox("Select New Role", 
                                options=list(get_role_permissions().keys()),
                                key="update_role")
@@ -728,12 +728,6 @@ def user_management():
 def has_permission(permission):
     return permission in st.session_state.users[st.session_state.current_user]['permissions']
 
-
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-from datetime import datetime, timedelta
-
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
@@ -742,7 +736,27 @@ import tempfile
 import os
 
 def main():
-    st.set_page_config(page_title="Inventory Management Dashboard", layout="wide")
+    if not check_password():
+        return
+
+    st.sidebar.title(f"Welcome, {st.session_state.current_user}")
+    st.sidebar.write(f"Role: {st.session_state.current_role}")
+    
+    if st.sidebar.button("Logout"):
+        st.session_state.authenticated = False
+        st.rerun()
+
+    if st.session_state.current_user == 'Harsh':
+        if st.sidebar.button("Manage Users"):
+            st.session_state.show_user_management = True
+        
+    if st.session_state.get('show_user_management', False):
+        user_management()
+        if st.button("Back to Dashboard"):
+            st.session_state.show_user_management = False
+            st.rerun()
+        return
+    # st.set_page_config(page_title="Inventory Management Dashboard", layout="wide")
 
     # Custom CSS styling
     st.markdown("""
@@ -755,28 +769,8 @@ def main():
             .status-good {color: green;}
         </style>
     """, unsafe_allow_html=True)
-    if not check_password():
-        return
 
-    st.sidebar.title(f"Welcome, {st.session_state.current_user}")
-    st.sidebar.write(f"Role: {st.session_state.current_role}")
-    
-    if st.sidebar.button("Logout"):
-        st.session_state.authenticated = False
-        st.rerun()
-
-    if st.session_state.current_user == 'User Harsh':
-        if st.sidebar.button("Manage Users"):
-            st.session_state.show_user_management = True
-        
-    if st.session_state.get('show_user_management', False):
-        user_management()
-        if st.button("Back to Dashboard"):
-            st.session_state.show_user_management = False
-            st.rerun()
-        return
-
-    st.title("Inventory Management Dashboard")
+    # st.title("Inventory Management Dashboard")
 
     # File upload in Sidebar
     uploaded_file = st.sidebar.file_uploader("Upload Excel File", type=['xlsx'], key="excel_uploader")
@@ -854,7 +848,7 @@ def main():
             # Create tabs
             tabs = st.tabs(["Overview", "Inventory Status", "Shipment Planning", 
                             "Loss Analysis", "Profit Analysis", "Maximum DRR Analysis", 
-                            "DRR Timeline","Labels data"])
+                            "DRR Timeline","Labels data","Target Sales Management"])
             # Overview Tab
             with tabs[0]:
                 st.header("Overview")
@@ -1078,13 +1072,210 @@ def main():
             
             with tabs[7]:
                 st.header("Labels Sheet")
-                st.dataframe(labels_data)            
+                st.dataframe(labels_data)       
+
+            with tabs[8]:
+                st.header("Target Sales Management")
+        # Load or initialize data
+                if 'data' not in st.session_state:
+                    try:
+                        st.session_state.data = pd.read_csv('target_sales_data.csv')
+                    except FileNotFoundError:
+                        st.session_state.data = pd.DataFrame(columns=['Month', 'ASIN', 'Product_Name', 'Units', 'Price', 'Total'])
+                data = st.session_state.data
+        
+        # Define month days
+                month_days = {
+            'January': 31, 'February': 28, 'March': 31, 'April': 30,
+            'May': 31, 'June': 30, 'July': 31, 'August': 31,
+            'September': 30, 'October': 31, 'November': 30, 'December': 31
+                }
+        
+        # Predefined products and ASINs
+                products = pd.DataFrame([
+    {'ASIN': 'B07GNLN5K2', 'Product_Name': 'SVA Peppermint Arvensis 4 Oz'},
+    {'ASIN': 'B07GCQDX6M', 'Product_Name': 'SVA Citronella Oil 4 Oz'},
+    {'ASIN': 'B072M2MTK1', 'Product_Name': 'SVA Rose Water 4 Oz (US)'},
+    {'ASIN': 'B09TXNSQDJ', 'Product_Name': 'SIVA Camphor oil 4oz'},
+    {'ASIN': 'B09VPLLPMB', 'Product_Name': 'SIVA Lavender 4 oz'},
+    {'ASIN': 'B09V7XXJ52', 'Product_Name': 'SIVA Citronella Oil 4 Oz'},
+    {'ASIN': 'B071LQFHPY', 'Product_Name': 'SVA Eucalyptus Oil 4 Oz (US)'},
+    {'ASIN': 'B07J1JZJY2', 'Product_Name': 'SVA Rosemary Essential Oil – 1 Fl Oz'},
+    {'ASIN': 'B072PYW2VM', 'Product_Name': 'SVA Oregano Oil 4 Oz'},
+    {'ASIN': 'B07YWWXLJS', 'Product_Name': 'SVA Carrot Seed Oil 4 Oz'},
+    {'ASIN': 'B071ZQ5J4X', 'Product_Name': 'SVA Lavender Oil 4 Oz'},
+    {'ASIN': 'B09W9SX1W8', 'Product_Name': 'SIVA Tea Tree Oil 4 Oz'},
+    {'ASIN': 'B09W2VSN54', 'Product_Name': 'SIVA Peppermint Oil 4 Oz'},
+    {'ASIN': 'B09W28G7L3', 'Product_Name': 'SIVA Lemongrass Oil 4 Oz'},
+    {'ASIN': 'B07Q4TD8RS', 'Product_Name': 'SVA Bhringraj Oil 4 Oz'},
+    {'ASIN': 'B09V1FGQ8Z', 'Product_Name': 'SIVA Clove bud Oil 4 Oz'},
+    {'ASIN': 'B071W92ZRG', 'Product_Name': 'SVA Clove bud Oil 4 Oz (US)'},
+    {'ASIN': 'B07W8THF1Q', 'Product_Name': 'SVA Thyme Oil 4 Oz'},
+    {'ASIN': 'B072Q32KJ2', 'Product_Name': 'SVA Frankincense Serrata 4Oz'},
+    {'ASIN': 'B09W2VZDMQ', 'Product_Name': 'SIVA Peppermint Oil 1 Oz'},
+    {'ASIN': 'B0B8HDYRZQ', 'Product_Name': 'SVA Fenugreek Oil 1 Oz'},
+    {'ASIN': 'B072M55KZT', 'Product_Name': 'SVA Castor 4oz'},
+    {'ASIN': 'B09WZYCXRQ', 'Product_Name': 'SIVA Eucalyptus Essential Oil 4oz'},
+    {'ASIN': 'B078Z2KPT5', 'Product_Name': 'SVA Marula Oil 4oz (US)'},
+    {'ASIN': 'B09VS77ZDT', 'Product_Name': 'SIVA Lemon Oil 4oz'},
+    {'ASIN': 'B07MNRLWRN', 'Product_Name': 'SVA Thuja Oil 1oz'},
+    {'ASIN': 'B07MCKSNZQ', 'Product_Name': 'SVA Pumpkin Seed Oil 4oz (US)'},
+    {'ASIN': 'B07J14W55P', 'Product_Name': 'SVA Rosemary Oil 4oz'},
+    {'ASIN': 'B07J1L77D3', 'Product_Name': 'SVA Tangerine Oil 4oz (US)'},
+    {'ASIN': 'B0BY54K6C3', 'Product_Name': 'SVA Fenugreek Oil 4oz'},
+    {'ASIN': 'B07FSV4FNK', 'Product_Name': 'SVA Hemp Seed Oil 4oz (US)'},
+    {'ASIN': 'B07FSZ921M', 'Product_Name': 'SVA Evening Primrose Oil 4oz (US)'},
+    {'ASIN': 'B081RJL36N', 'Product_Name': 'SVA Spearmint Oil 4oz'},
+    {'ASIN': 'B0BB9QN29D', 'Product_Name': 'SIVA Turmeric Oil 4oz'},
+    {'ASIN': 'B078Z17WQ9', 'Product_Name': 'SVA Moringa Oil 4oz'},
+    {'ASIN': 'B07Y1LCD7T', 'Product_Name': 'SVA Cinnamon Leaf Oil 4oz'},
+    {'ASIN': 'B07XLS76L4', 'Product_Name': 'SVA Citriodora Oil 4oz'},
+    {'ASIN': 'B07895DHYQ', 'Product_Name': 'SVA Lemon Oil 4oz'},
+    {'ASIN': 'B071J8GQCJ', 'Product_Name': 'SVA Peppermint Piperita Oil 4oz'},
+    {'ASIN': 'B07J1WMHT2', 'Product_Name': 'SVA Geranium Oil 1oz (US)'},
+    {'ASIN': 'B071FNLVF5', 'Product_Name': 'SVA Tamanu Oil 4oz'},
+    {'ASIN': 'B07FSYZM6H', 'Product_Name': 'SVA Amla Oil 4oz'},
+    {'ASIN': 'B09W2KHTWX', 'Product_Name': 'SIVA Moringa Oil 4oz'},
+    {'ASIN': 'B072Q1NW1T', 'Product_Name': 'SVA Lemongrass Oil 4oz'},
+    {'ASIN': 'B078Z1CPV4', 'Product_Name': 'SVA Turmeric Oil 4oz'},
+    {'ASIN': 'B07WPDW2K2', 'Product_Name': 'SVA Tea Tree Oil 1oz'},
+    {'ASIN': 'B0788WTFPY', 'Product_Name': 'SVA Orange Oil 4oz (US)'},
+    {'ASIN': 'B0788XRBJ5', 'Product_Name': 'SVA Black Seed Oil 4oz'},
+    {'ASIN': 'B07895B2VZ', 'Product_Name': 'SVA Pine Needle Oil 4oz (US)'},
+    {'ASIN': 'B07GNJHVZK', 'Product_Name': 'SVA Ginger Oil 1oz'},
+    {'ASIN': 'B079G5H8XP', 'Product_Name': 'SVA Black Seed Oil 16oz'},
+    {'ASIN': 'B0788X172Q', 'Product_Name': 'SVA Pomegranate Seed Oil 4oz (US)'},
+    {'ASIN': 'B07QZ4138D', 'Product_Name': 'SVA Myrrh Oil 10ml (US)'},
+    {'ASIN': 'B0BB9SJS1P', 'Product_Name': 'SIVA Papaya Seed Oil 4oz'},
+    {'ASIN': 'B07MV28C29', 'Product_Name': 'SVA Camellia Oil 4oz (US)'},
+    {'ASIN': 'B09W53YQ55', 'Product_Name': 'SIVA Peppermint Arvensis Oil 4oz'},
+    {'ASIN': 'B078Z2HG94', 'Product_Name': 'SVA Papaya Seed Oil 4oz'},
+    {'ASIN': 'B07MGXBVWT', 'Product_Name': 'SVA Rue Oil 10 ml'},
+    {'ASIN': 'B07M85KPDK', 'Product_Name': 'SVA Nutmeg Oil 10 ml'},
+    {'ASIN': 'B07J1K4B3R', 'Product_Name': 'SVA Mandarin Oil 4oz'},
+    {'ASIN': 'B07XCH3NH1', 'Product_Name': 'SVA Ojas Shield Oil 1oz (US)'},
+    {'ASIN': 'B07MKSX3KS', 'Product_Name': 'SIVA Lavender 40/42 Oil 4oz'},
+    {'ASIN': 'B07YYCLVGQ', 'Product_Name': 'SVA Cucumber Seed Oil 4oz (US)'},
+    {'ASIN': 'B07MT9CY7B', 'Product_Name': 'SVA Calamus Oil 1oz'},
+    {'ASIN': 'B086X1WC4N', 'Product_Name': 'SVA Tea Tree Oil 4oz'},
+    {'ASIN': 'B07MCXKY2R', 'Product_Name': 'SVA Fir Balsam Oil 4oz (US)'},
+    {'ASIN': 'B07J1DS78L', 'Product_Name': 'SVA Camphor Oil 4oz'},
+    {'ASIN': 'B07M7VQ1N1', 'Product_Name': 'SVA Lime Oil 4oz'},
+    {'ASIN': 'B0789JGL72', 'Product_Name': 'SVA Fir Needle Oil 4oz (US)'},
+    {'ASIN': 'B07BY4KRKN', 'Product_Name': 'SVA Copaiba Oil 4oz (US)'},
+    {'ASIN': 'B078HSPXRG', 'Product_Name': 'SVA Clove Bud Oil 32oz'},
+    {'ASIN': 'B07GNJPSD8', 'Product_Name': 'SVA Ginger Oil 4oz'},
+    {'ASIN': 'B07MGXBWBD', 'Product_Name': 'SVA Brahmi Oil 4oz'},
+    {'ASIN': 'B071ZMQ3X8', 'Product_Name': 'SVA Rosehip Seed Oil 4oz'},
+    {'ASIN': 'B081RV3696', 'Product_Name': 'SVA Palmarosa Oil 4oz'},
+    {'ASIN': 'B07MQK6HH6', 'Product_Name': 'SVA Patchouli Oil 4oz'},
+    {'ASIN': 'B09V1CYXWC', 'Product_Name': 'SIVA Clove Bud Oil 1oz'},
+    {'ASIN': 'B07M9QQ8XL', 'Product_Name': 'SVA Apricot Oil 4oz (US)'},
+    {'ASIN': 'B07X6MTBGG', 'Product_Name': 'SVA Cypress Oil 4oz'},
+    {'ASIN': 'B078J4YVKX', 'Product_Name': 'SVA Black Seed Oil 32 oz (US)'},
+    {'ASIN': 'B07M9QQHL3', 'Product_Name': 'SVA Rue Oil 1oz'},
+    {'ASIN': 'B07MT8FWT1', 'Product_Name': 'SVA Fir Balsam Oil 1oz (US)'},
+    {'ASIN': 'B07D8L56GT', 'Product_Name': 'SVA Cedarwood Oil 4 oz (Juniperus Mexicana)'},
+    {'ASIN': 'B07GNKQVB9', 'Product_Name': 'SVA Coffee Oil 1oz'},
+    {'ASIN': 'B07DV388CJ', 'Product_Name': 'SVA Oregano Oil 1oz'},
+    {'ASIN': 'B07GCPD2DR', 'Product_Name': 'SVA Neem Oil 4oz'},
+    {'ASIN': 'B07Z1QQ42V', 'Product_Name': 'SVA Grapefruit Oil 4oz'},
+    {'ASIN': 'B07J1GWPLG', 'Product_Name': 'SVA Manuka Oil 10ml'},
+    {'ASIN': 'B0B96QWSSM', 'Product_Name': 'SVA Chamomile Oil 1oz'},
+    {'ASIN': 'B07QWD4P6B', 'Product_Name': 'SVA Broccoli Seed Oil 4oz (US)'},
+    {'ASIN': 'B07X2MWH2T', 'Product_Name': 'SVA Frankincense Serrata Oil 1oz'},
+    {'ASIN': 'B07MQWNZYX', 'Product_Name': 'SVA Carrot Seed Oil 1oz'},
+    {'ASIN': 'B07DTPRH2D', 'Product_Name': 'SVA Frakincense Carterii Oil 1oz'},
+    {'ASIN': 'B09VSZ5G8G', 'Product_Name': 'SIVA Lemongrass Oil 10ml'},
+    {'ASIN': 'B07N8XR8C4', 'Product_Name': 'SVA Argan Oil 4oz (US)'},
+    {'ASIN': 'B07MHTC185', 'Product_Name': 'SVA Tamanu Oil 16oz (US)'},
+    {'ASIN': 'B07MQW2DVJ', 'Product_Name': 'SVA Nutmeg Oil 4oz'},
+    {'ASIN': 'B07MHFB1KF', 'Product_Name': 'SVA Camphor Oil 16oz'},
+    {'ASIN': 'B07M648LY3', 'Product_Name': 'SVA Thuja Oil 4oz'},
+    {'ASIN': 'B07MP8J2HY', 'Product_Name': 'SVA Basil Holy Tulsi 10ml'},
+    {'ASIN': 'B07MCVDHQD', 'Product_Name': 'SVA Clary Sage Oil 10ml (US)'},
+    {'ASIN': 'B07V3L6FKH', 'Product_Name': 'SVA Manuka Oil 1oz'},
+    {'ASIN': 'B07GNL59MF', 'Product_Name': 'SVA Coffee Oil 10ml'},
+    {'ASIN': 'B081RSJN5D', 'Product_Name': 'SVA Sweet Fennel Oil 4oz (US)'},
+    {'ASIN': 'B07M7WL2HD', 'Product_Name': 'SVA Baobab Oil 4oz (US)'},
+    {'ASIN': 'B07MKSXC3R', 'Product_Name': 'SIVA Lavender 40/42 Oil 16oz'},
+    {'ASIN': 'B07R2CL5H9', 'Product_Name': 'SVA Chamomile Oil 10ml'},
+    {'ASIN': 'B07MMBDRB7', 'Product_Name': 'SVA Black Pepper Oil 4oz'},
+    {'ASIN': 'B07MB11J1L', 'Product_Name': 'SIVA Lavender 40/42 Oil 32oz'},
+    {'ASIN': 'B07MV1F6C5', 'Product_Name': 'SVA Cherry Kernel Oil 4oz'},
+    {'ASIN': 'B07N7BM5ZS', 'Product_Name': 'SVA Juniper Berry Oil 4oz'},
+    {'ASIN': 'B07J1K2R2Y', 'Product_Name': 'SVA Frankincense Sacra Oil 1oz'},
+    {'ASIN': 'B07MB7KW1Q', 'Product_Name': 'SVA Camphor oil 32oz'},
+    {'ASIN': 'B07Q85R78Y', 'Product_Name': 'SVA Brahmi Oil 8oz (US)'},
+    {'ASIN': 'B07J1BHVYT', 'Product_Name': 'SVA Frankincense Sacra Oil 10ml'},
+    {'ASIN': 'B07MKYPN1Z', 'Product_Name': 'SVA Brahmi Oil 32oz'},
+    {'ASIN': 'B07ZM5XPMC', 'Product_Name': 'SVA Macadamia Oil 4oz (US)'},
+    {'ASIN': 'B07DVQT8BM', 'Product_Name': 'SVA Cedarwood Essential Oil 4oz'},
+    {'ASIN': 'B072Q22P7Q', 'Product_Name': 'SVA Jojoba Oil 4oz (US)'},
+    {'ASIN': 'B07N8XW62L', 'Product_Name': 'SVA Sweet Basil Oil 4oz'},
+    {'ASIN': 'B09TZRP8YM', 'Product_Name': 'SIVA Carrot Seed Oil 4 Oz'},
+    {'ASIN': 'B07MF74H7F', 'Product_Name': 'SVA Tamanu Oil 32 Oz (US)'},
+    {'ASIN': 'B07DTMDJHP', 'Product_Name': 'SVA Frankincense Carterii Oil 10 ml'},
+    {'ASIN': 'B0DH2L7Z1P', 'Product_Name': 'SVA Lemongrass Oil Organic 16 Oz (US)'},
+    {'ASIN': 'B0DH2N9R8X', 'Product_Name': 'SVA Eucalyptus Oil Organic 16 Oz (US)'},
+    {'ASIN': 'B0DH2NVJT9', 'Product_Name': 'SVA Frankincense Serrata Oil Organic 16 Oz (US)'},
+    {'ASIN': 'B0D2XHBM2N', 'Product_Name': 'Siva Peppermint Oil 16 Oz (US)'},
+    {'ASIN': 'B0DH2LJV1R', 'Product_Name': 'SVA Clove Bud Oil Organic 16 oz (US)'},
+    {'ASIN': 'B0D2X7G32Z', 'Product_Name': 'Siva Lavender Oil 16 Oz (US)'},
+    {'ASIN': 'B0DHC6MT9S', 'Product_Name': 'Siva Lemon Oil – 16 Oz (US)'},
+    {'ASIN': 'B0DHH2Q6GM', 'Product_Name': 'Siva Camphor Oil – 16 Oz (US)'},
+    {'ASIN': 'B0DHGWZLQX', 'Product_Name': 'Siva Tea Tree Oil – 16 Oz (US)'},
+    {'ASIN': 'B0DH2J1TLG', 'Product_Name': 'SVA Oregano Oil – 16 Oz (US)'}
+]
+)
+        
+        # Select month
+                month = st.selectbox("Select Month", options=list(month_days.keys()))
+        
+        # Initialize or load editable data
+                if 'editable_data' not in st.session_state or st.session_state.selected_month != month:
+                    st.session_state.selected_month = month
+                    existing_data = data[data['Month'] == month]
+                    if existing_data.empty:
+                        editable_data = products.copy()
+                        editable_data['Month'] = month
+                        editable_data['Units'] = 0
+                        editable_data['Price'] = 0.0
+                        editable_data['Total'] = 0.0
+                    else:
+                        editable_data = existing_data[['Month', 'ASIN', 'Product_Name', 'Units', 'Price', 'Total']].copy()
+                    st.session_state.editable_data = editable_data
+        
+                enable_edit = st.toggle("Enable Editing")
+        
+                st.subheader(f"Set Targets for {month}")
+                if enable_edit:
+                    edited_data = st.data_editor(
+                        st.session_state.editable_data[['ASIN', 'Product_Name', 'Units', 'Price']],
+                        num_rows="fixed", key="edit_table"
+                    )
+                    if st.button("Save Targets"):
+                        edited_data['Month'] = month
+                        edited_data['Total'] = edited_data['Units'] * edited_data['Price'] * month_days[month]
+                
+                        data = data[data['Month'] != month]
+                        data = pd.concat([data, edited_data], ignore_index=True)
+                
+                        st.session_state.data = data
+                        data.to_csv('target_sales_data.csv', index=False)
+                        st.success(f"Targets for {month} saved successfully!")
+                else:
+                    st.dataframe(st.session_state.editable_data[['ASIN', 'Product_Name', 'Units', 'Price', 'Total']])
+     
 
         except Exception as e:
             st.error("Error processing data")
             st.exception(e)
+        if has_permission('read'):
+             st.title("Inventory Management Dashboard")
+        # ... rest of your existing code ...
     else:
-        st.info("Please upload an Excel file to begin analysis.")
+        pass
 
 if __name__ == "__main__":
     main()
