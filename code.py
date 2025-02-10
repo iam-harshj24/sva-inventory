@@ -1204,7 +1204,7 @@ def main():
                             total_inventory = filtered_label_plan['Current Inventory'].sum()
                             st.metric("Total Current Inventory", f"{total_inventory:,.0f}")
                         with col3:
-                            total_required = filtered_label_plan['Required Inventory (Stocks+Packed+New Orders)'].sum()
+                            total_required = filtered_label_plan['Required Labels (Stocks+Packed+New Orders)'].sum()
                             st.metric("Total Required Inventory", f"{total_required:,.0f}")
 
                 # Display the filtered dataframe
