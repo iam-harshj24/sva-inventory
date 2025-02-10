@@ -593,9 +593,7 @@ def calculate_daily_drr(file_path, sheet_name, target_date):
     # with tabs[6]:
     #     add_drr_timeline_tab()
 
-def read_labels_data(uploaded_file, sheet_name):
-    df = pd.read_excel(uploaded_file, sheet_name=sheet_name)
-    return df
+
     
 def init_users():
     if 'users' not in st.session_state:
@@ -728,6 +726,87 @@ def user_management():
 def has_permission(permission):
     return permission in st.session_state.users[st.session_state.current_user]['permissions']
 
+def read_us_products_data(uploaded_file, sheet_name="US Products"):
+    """Reads US Products sheet from Excel file and returns a DataFrame with ASIN, AWD, Backstock, and Upcoming Orders."""
+    try:
+        df = pd.read_excel(uploaded_file, sheet_name=sheet_name)
+        df = df[['ASIN','Product Name', 'AWD', 'Backstock', 'Upcoming Orders']].dropna()
+        return df
+    except Exception as e:
+        st.error(f"Error reading {sheet_name} sheet: {e}")
+        return pd.DataFrame()
+    
+def calculate_us_shipment_plan(inventory_status, us_products_data, target_date):
+    if target_date is None:
+        target_date = datetime.now() + timedelta(days=30)
+
+    target_date = pd.to_datetime(target_date)
+    result = inventory_status.copy()
+
+    # Filter inventory status to include only ASINs present in the US Products sheet
+    result = result[result['ASIN'].isin(us_products_data['ASIN'])]
+
+    # Calculate Days until Target
+    result['Days_To_Target'] = (target_date - datetime.today()).days + 1
+    result['Expected_Usage'] = (result['Daily_Run_Rate'] * result['Days_To_Target']).round()
+
+    # Merge inventory data with US Products AWD, Backstock, and Upcoming Order
+    result = result.merge(us_products_data, on='ASIN', how='left').fillna(0)
+    result['Product Name'] = result['Product Name_x']
+
+    # Display all columns (including AWD, Backstock, and Upcoming Orders)
+    result = result[['ASIN', 'Product Name', 'Current Inventory', 'Daily_Run_Rate', 'Expected_Usage',
+                     'Total Upcoming Shipment', 'Days_To_Target', 
+                     'AWD', 'Backstock', 'Upcoming Orders']]
+
+    # Adjust total available inventory
+    result['Total Available Stocks with BS & AWD'] = result['Total Upcoming Shipment'] + result['AWD'] + result['Backstock'] 
+    result['Total Available Stocks with BS,AWD & Orders'] = result['Total Upcoming Shipment'] + result['AWD'] + result['Backstock']+result['Upcoming Orders']
+
+    # Calculate Required Projected Inventory
+    # result['Required Projected Inventory With AWD & BS'] = (result['Expected_Usage'] - result['Total Available Stocks with BS & AWD']).round()
+    result['Required Inventory(AWD+BS+ORDERS)'] = (result['Expected_Usage'] - result['Total Available Stocks with BS,AWD & Orders']).round()
+    # Subtract AWD, Backstock, and Upcoming Orders from Required Projected Inventory
+    # result['Final Required Shipment'] = result['Required Projected Inventory'] - result['AWD'] - result['Backstock'] - result['Upcoming Orders']
+
+    # Ensure Final Required Shipment is not negative
+    # result['Final Required Shipment'] = result['Final Required Shipment'].apply(lambda x: max(x, 0))
+  
+    result.to_csv('us_shipment_pla.csv', index=False)
+    return result
+def process_label_planning(uploaded_file, inventory_status, target_date=None):
+    """Reads label data, merges with inventory data, and calculates label planning details."""
+    try:
+        # Read label data
+        label_data = pd.read_excel(uploaded_file, sheet_name='labels')
+        label_data = label_data[['ASIN', 'Product Name', 'IN Stocks', 'Packed', 'New Orders']].dropna()
+    except Exception as e:
+        st.error(f"Error reading labels sheet: {e}")
+        return pd.DataFrame()
+    
+    if target_date is None:
+        target_date = datetime.now() + timedelta(days=30)
+    target_date = pd.to_datetime(target_date)
+    
+    # Copy inventory status and calculate expected usage
+    result = inventory_status.copy()
+    result['Days_To_Target'] = (target_date - datetime.today()).days + 1
+    result['Expected_Usage'] = (result['Daily_Run_Rate'] * result['Days_To_Target']).round()
+    
+    # Merge label data
+    result = result.merge(label_data, on='ASIN', how='left').fillna(0)
+    result['Product Name'] = result['Product Name_x']
+    
+    # Calculate required inventory
+    result['Total Available Label (Stocks+Packed)'] = result['Total Upcoming Shipment'] + result['IN Stocks'] + result['Packed'] 
+    result['Total Available Label (Stocks+Packed+New Orders)'] = result['Total Available Label (Stocks+Packed)'] + result['New Orders']
+    result['Required Labels (Stocks+Packed+New Orders)'] = (result['Expected_Usage'] - result['Total Available Label (Stocks+Packed+New Orders)']).round()
+    
+    return result[['Date','ASIN', 'Product Name', 'Current Inventory', 'Daily_Run_Rate', 'Expected_Usage',
+                   'Total Upcoming Shipment', 'Days_To_Target', 'IN Stocks', 'Packed', 'New Orders',
+                   'Total Available Label (Stocks+Packed)', 'Total Available Label (Stocks+Packed+New Orders)',
+                   'Required Labels (Stocks+Packed+New Orders)']]
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
@@ -788,7 +867,8 @@ def main():
                 profit_data = read_gross_profit(uploaded_file, "Profit")
                 merged_data = merge_sales_and_profit(sales_data, profit_data)
                 inventory_data = read_inventory_data(uploaded_file, "Inventory")
-                labels_data = read_labels_data(uploaded_file,'labels')
+                # label_data = read_labels_data(uploaded_file,'labels')
+                us_products_data = read_us_products_data(uploaded_file, "US Products")
                 # Sidebar: DRR settings
                 st.sidebar.header("DRR Settings")
                 use_manual_drr = st.sidebar.checkbox("Use Manual DRR", value=False)
@@ -848,7 +928,7 @@ def main():
             # Create tabs
             tabs = st.tabs(["Overview", "Inventory Status", "Shipment Planning", 
                             "Loss Analysis", "Profit Analysis", "Maximum DRR Analysis", 
-                            "DRR Timeline","Labels data","Target Sales Management"])
+                            "DRR Timeline","Labels data","Target Sales Management","US Products Shipment Planning"])
             # Overview Tab
             with tabs[0]:
                 st.header("Overview")
@@ -1071,8 +1151,77 @@ def main():
                     st.warning("Please upload an Excel file to proceed.")
             
             with tabs[7]:
-                st.header("Labels Sheet")
-                st.dataframe(labels_data)       
+                st.header("Labels Planning")
+                
+                if uploaded_file is not None:
+                    target_date = st.date_input(
+                        "Select Target Date for Label Planning",
+                        value=datetime.now() + timedelta(days=30),
+                        min_value=datetime.now(),
+                        key="label_target_date"
+                    )
+
+        # Get the label plan first
+                    label_plan = process_label_planning(uploaded_file, inventory_status, target_date)
+        
+                    if not label_plan.empty:
+            # Apply filters to label plan
+                        filtered_label_plan = label_plan.copy()
+            
+            # Apply date filter if selected
+                        if selected_dates:
+                            filtered_label_plan = filtered_label_plan[
+                                filtered_label_plan['Date'].isin(selected_dates)
+                ]
+            
+            # Apply ASIN filter if selected
+                        if selected_asins:
+                            filtered_label_plan = filtered_label_plan[
+                                filtered_label_plan['ASIN'].isin(selected_asins)
+                            ]
+            
+            # Apply product filter if selected
+                        if selected_products:
+                            filtered_label_plan = filtered_label_plan[
+                                filtered_label_plan['Product Name'].isin(selected_products)
+                            ]
+
+                        st.subheader("Label Plan")
+                        display_columns = [
+                'Date', 'ASIN', 'Product Name', 'Current Inventory', 
+                'Daily_Run_Rate', 'Expected_Usage', 'IN Stocks', 
+                'Packed', 'New Orders', 'Total Available Label (Stocks+Packed)', 
+                'Required Labels (Stocks+Packed+New Orders)'
+                        ]
+            
+                    if all(col in filtered_label_plan.columns for col in display_columns):
+                # Display metrics for the filtered data
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            total_products = len(filtered_label_plan['Product Name'].unique())
+                            st.metric("Total Products", total_products)
+                        with col2:
+                            total_inventory = filtered_label_plan['Current Inventory'].sum()
+                            st.metric("Total Current Inventory", f"{total_inventory:,.0f}")
+                        with col3:
+                            total_required = filtered_label_plan['Required Inventory (Stocks+Packed+New Orders)'].sum()
+                            st.metric("Total Required Inventory", f"{total_required:,.0f}")
+
+                # Display the filtered dataframe
+                        st.dataframe(filtered_label_plan[display_columns])
+                
+                # # Add visualizati        
+                # Download button for filtered data
+                        st.download_button(
+                                label="Download Filtered Label Plan",
+                            data=filtered_label_plan.to_csv(index=False),
+                            file_name="filtered_label_plan.csv",
+                            mime="text/csv"
+                        )
+                    else:
+                        st.warning("Some expected columns are missing in the Label Plan data.")
+                else:
+                    st.warning("No valid label data found in the uploaded file.")
 
             with tabs[8]:
                 st.header("Target Sales Management")
@@ -1096,136 +1245,6 @@ def main():
     {'ASIN': 'B07GNLN5K2', 'Product_Name': 'SVA Peppermint Arvensis 4 Oz'},
     {'ASIN': 'B07GCQDX6M', 'Product_Name': 'SVA Citronella Oil 4 Oz'},
     {'ASIN': 'B072M2MTK1', 'Product_Name': 'SVA Rose Water 4 Oz (US)'},
-    {'ASIN': 'B09TXNSQDJ', 'Product_Name': 'SIVA Camphor oil 4oz'},
-    {'ASIN': 'B09VPLLPMB', 'Product_Name': 'SIVA Lavender 4 oz'},
-    {'ASIN': 'B09V7XXJ52', 'Product_Name': 'SIVA Citronella Oil 4 Oz'},
-    {'ASIN': 'B071LQFHPY', 'Product_Name': 'SVA Eucalyptus Oil 4 Oz (US)'},
-    {'ASIN': 'B07J1JZJY2', 'Product_Name': 'SVA Rosemary Essential Oil – 1 Fl Oz'},
-    {'ASIN': 'B072PYW2VM', 'Product_Name': 'SVA Oregano Oil 4 Oz'},
-    {'ASIN': 'B07YWWXLJS', 'Product_Name': 'SVA Carrot Seed Oil 4 Oz'},
-    {'ASIN': 'B071ZQ5J4X', 'Product_Name': 'SVA Lavender Oil 4 Oz'},
-    {'ASIN': 'B09W9SX1W8', 'Product_Name': 'SIVA Tea Tree Oil 4 Oz'},
-    {'ASIN': 'B09W2VSN54', 'Product_Name': 'SIVA Peppermint Oil 4 Oz'},
-    {'ASIN': 'B09W28G7L3', 'Product_Name': 'SIVA Lemongrass Oil 4 Oz'},
-    {'ASIN': 'B07Q4TD8RS', 'Product_Name': 'SVA Bhringraj Oil 4 Oz'},
-    {'ASIN': 'B09V1FGQ8Z', 'Product_Name': 'SIVA Clove bud Oil 4 Oz'},
-    {'ASIN': 'B071W92ZRG', 'Product_Name': 'SVA Clove bud Oil 4 Oz (US)'},
-    {'ASIN': 'B07W8THF1Q', 'Product_Name': 'SVA Thyme Oil 4 Oz'},
-    {'ASIN': 'B072Q32KJ2', 'Product_Name': 'SVA Frankincense Serrata 4Oz'},
-    {'ASIN': 'B09W2VZDMQ', 'Product_Name': 'SIVA Peppermint Oil 1 Oz'},
-    {'ASIN': 'B0B8HDYRZQ', 'Product_Name': 'SVA Fenugreek Oil 1 Oz'},
-    {'ASIN': 'B072M55KZT', 'Product_Name': 'SVA Castor 4oz'},
-    {'ASIN': 'B09WZYCXRQ', 'Product_Name': 'SIVA Eucalyptus Essential Oil 4oz'},
-    {'ASIN': 'B078Z2KPT5', 'Product_Name': 'SVA Marula Oil 4oz (US)'},
-    {'ASIN': 'B09VS77ZDT', 'Product_Name': 'SIVA Lemon Oil 4oz'},
-    {'ASIN': 'B07MNRLWRN', 'Product_Name': 'SVA Thuja Oil 1oz'},
-    {'ASIN': 'B07MCKSNZQ', 'Product_Name': 'SVA Pumpkin Seed Oil 4oz (US)'},
-    {'ASIN': 'B07J14W55P', 'Product_Name': 'SVA Rosemary Oil 4oz'},
-    {'ASIN': 'B07J1L77D3', 'Product_Name': 'SVA Tangerine Oil 4oz (US)'},
-    {'ASIN': 'B0BY54K6C3', 'Product_Name': 'SVA Fenugreek Oil 4oz'},
-    {'ASIN': 'B07FSV4FNK', 'Product_Name': 'SVA Hemp Seed Oil 4oz (US)'},
-    {'ASIN': 'B07FSZ921M', 'Product_Name': 'SVA Evening Primrose Oil 4oz (US)'},
-    {'ASIN': 'B081RJL36N', 'Product_Name': 'SVA Spearmint Oil 4oz'},
-    {'ASIN': 'B0BB9QN29D', 'Product_Name': 'SIVA Turmeric Oil 4oz'},
-    {'ASIN': 'B078Z17WQ9', 'Product_Name': 'SVA Moringa Oil 4oz'},
-    {'ASIN': 'B07Y1LCD7T', 'Product_Name': 'SVA Cinnamon Leaf Oil 4oz'},
-    {'ASIN': 'B07XLS76L4', 'Product_Name': 'SVA Citriodora Oil 4oz'},
-    {'ASIN': 'B07895DHYQ', 'Product_Name': 'SVA Lemon Oil 4oz'},
-    {'ASIN': 'B071J8GQCJ', 'Product_Name': 'SVA Peppermint Piperita Oil 4oz'},
-    {'ASIN': 'B07J1WMHT2', 'Product_Name': 'SVA Geranium Oil 1oz (US)'},
-    {'ASIN': 'B071FNLVF5', 'Product_Name': 'SVA Tamanu Oil 4oz'},
-    {'ASIN': 'B07FSYZM6H', 'Product_Name': 'SVA Amla Oil 4oz'},
-    {'ASIN': 'B09W2KHTWX', 'Product_Name': 'SIVA Moringa Oil 4oz'},
-    {'ASIN': 'B072Q1NW1T', 'Product_Name': 'SVA Lemongrass Oil 4oz'},
-    {'ASIN': 'B078Z1CPV4', 'Product_Name': 'SVA Turmeric Oil 4oz'},
-    {'ASIN': 'B07WPDW2K2', 'Product_Name': 'SVA Tea Tree Oil 1oz'},
-    {'ASIN': 'B0788WTFPY', 'Product_Name': 'SVA Orange Oil 4oz (US)'},
-    {'ASIN': 'B0788XRBJ5', 'Product_Name': 'SVA Black Seed Oil 4oz'},
-    {'ASIN': 'B07895B2VZ', 'Product_Name': 'SVA Pine Needle Oil 4oz (US)'},
-    {'ASIN': 'B07GNJHVZK', 'Product_Name': 'SVA Ginger Oil 1oz'},
-    {'ASIN': 'B079G5H8XP', 'Product_Name': 'SVA Black Seed Oil 16oz'},
-    {'ASIN': 'B0788X172Q', 'Product_Name': 'SVA Pomegranate Seed Oil 4oz (US)'},
-    {'ASIN': 'B07QZ4138D', 'Product_Name': 'SVA Myrrh Oil 10ml (US)'},
-    {'ASIN': 'B0BB9SJS1P', 'Product_Name': 'SIVA Papaya Seed Oil 4oz'},
-    {'ASIN': 'B07MV28C29', 'Product_Name': 'SVA Camellia Oil 4oz (US)'},
-    {'ASIN': 'B09W53YQ55', 'Product_Name': 'SIVA Peppermint Arvensis Oil 4oz'},
-    {'ASIN': 'B078Z2HG94', 'Product_Name': 'SVA Papaya Seed Oil 4oz'},
-    {'ASIN': 'B07MGXBVWT', 'Product_Name': 'SVA Rue Oil 10 ml'},
-    {'ASIN': 'B07M85KPDK', 'Product_Name': 'SVA Nutmeg Oil 10 ml'},
-    {'ASIN': 'B07J1K4B3R', 'Product_Name': 'SVA Mandarin Oil 4oz'},
-    {'ASIN': 'B07XCH3NH1', 'Product_Name': 'SVA Ojas Shield Oil 1oz (US)'},
-    {'ASIN': 'B07MKSX3KS', 'Product_Name': 'SIVA Lavender 40/42 Oil 4oz'},
-    {'ASIN': 'B07YYCLVGQ', 'Product_Name': 'SVA Cucumber Seed Oil 4oz (US)'},
-    {'ASIN': 'B07MT9CY7B', 'Product_Name': 'SVA Calamus Oil 1oz'},
-    {'ASIN': 'B086X1WC4N', 'Product_Name': 'SVA Tea Tree Oil 4oz'},
-    {'ASIN': 'B07MCXKY2R', 'Product_Name': 'SVA Fir Balsam Oil 4oz (US)'},
-    {'ASIN': 'B07J1DS78L', 'Product_Name': 'SVA Camphor Oil 4oz'},
-    {'ASIN': 'B07M7VQ1N1', 'Product_Name': 'SVA Lime Oil 4oz'},
-    {'ASIN': 'B0789JGL72', 'Product_Name': 'SVA Fir Needle Oil 4oz (US)'},
-    {'ASIN': 'B07BY4KRKN', 'Product_Name': 'SVA Copaiba Oil 4oz (US)'},
-    {'ASIN': 'B078HSPXRG', 'Product_Name': 'SVA Clove Bud Oil 32oz'},
-    {'ASIN': 'B07GNJPSD8', 'Product_Name': 'SVA Ginger Oil 4oz'},
-    {'ASIN': 'B07MGXBWBD', 'Product_Name': 'SVA Brahmi Oil 4oz'},
-    {'ASIN': 'B071ZMQ3X8', 'Product_Name': 'SVA Rosehip Seed Oil 4oz'},
-    {'ASIN': 'B081RV3696', 'Product_Name': 'SVA Palmarosa Oil 4oz'},
-    {'ASIN': 'B07MQK6HH6', 'Product_Name': 'SVA Patchouli Oil 4oz'},
-    {'ASIN': 'B09V1CYXWC', 'Product_Name': 'SIVA Clove Bud Oil 1oz'},
-    {'ASIN': 'B07M9QQ8XL', 'Product_Name': 'SVA Apricot Oil 4oz (US)'},
-    {'ASIN': 'B07X6MTBGG', 'Product_Name': 'SVA Cypress Oil 4oz'},
-    {'ASIN': 'B078J4YVKX', 'Product_Name': 'SVA Black Seed Oil 32 oz (US)'},
-    {'ASIN': 'B07M9QQHL3', 'Product_Name': 'SVA Rue Oil 1oz'},
-    {'ASIN': 'B07MT8FWT1', 'Product_Name': 'SVA Fir Balsam Oil 1oz (US)'},
-    {'ASIN': 'B07D8L56GT', 'Product_Name': 'SVA Cedarwood Oil 4 oz (Juniperus Mexicana)'},
-    {'ASIN': 'B07GNKQVB9', 'Product_Name': 'SVA Coffee Oil 1oz'},
-    {'ASIN': 'B07DV388CJ', 'Product_Name': 'SVA Oregano Oil 1oz'},
-    {'ASIN': 'B07GCPD2DR', 'Product_Name': 'SVA Neem Oil 4oz'},
-    {'ASIN': 'B07Z1QQ42V', 'Product_Name': 'SVA Grapefruit Oil 4oz'},
-    {'ASIN': 'B07J1GWPLG', 'Product_Name': 'SVA Manuka Oil 10ml'},
-    {'ASIN': 'B0B96QWSSM', 'Product_Name': 'SVA Chamomile Oil 1oz'},
-    {'ASIN': 'B07QWD4P6B', 'Product_Name': 'SVA Broccoli Seed Oil 4oz (US)'},
-    {'ASIN': 'B07X2MWH2T', 'Product_Name': 'SVA Frankincense Serrata Oil 1oz'},
-    {'ASIN': 'B07MQWNZYX', 'Product_Name': 'SVA Carrot Seed Oil 1oz'},
-    {'ASIN': 'B07DTPRH2D', 'Product_Name': 'SVA Frakincense Carterii Oil 1oz'},
-    {'ASIN': 'B09VSZ5G8G', 'Product_Name': 'SIVA Lemongrass Oil 10ml'},
-    {'ASIN': 'B07N8XR8C4', 'Product_Name': 'SVA Argan Oil 4oz (US)'},
-    {'ASIN': 'B07MHTC185', 'Product_Name': 'SVA Tamanu Oil 16oz (US)'},
-    {'ASIN': 'B07MQW2DVJ', 'Product_Name': 'SVA Nutmeg Oil 4oz'},
-    {'ASIN': 'B07MHFB1KF', 'Product_Name': 'SVA Camphor Oil 16oz'},
-    {'ASIN': 'B07M648LY3', 'Product_Name': 'SVA Thuja Oil 4oz'},
-    {'ASIN': 'B07MP8J2HY', 'Product_Name': 'SVA Basil Holy Tulsi 10ml'},
-    {'ASIN': 'B07MCVDHQD', 'Product_Name': 'SVA Clary Sage Oil 10ml (US)'},
-    {'ASIN': 'B07V3L6FKH', 'Product_Name': 'SVA Manuka Oil 1oz'},
-    {'ASIN': 'B07GNL59MF', 'Product_Name': 'SVA Coffee Oil 10ml'},
-    {'ASIN': 'B081RSJN5D', 'Product_Name': 'SVA Sweet Fennel Oil 4oz (US)'},
-    {'ASIN': 'B07M7WL2HD', 'Product_Name': 'SVA Baobab Oil 4oz (US)'},
-    {'ASIN': 'B07MKSXC3R', 'Product_Name': 'SIVA Lavender 40/42 Oil 16oz'},
-    {'ASIN': 'B07R2CL5H9', 'Product_Name': 'SVA Chamomile Oil 10ml'},
-    {'ASIN': 'B07MMBDRB7', 'Product_Name': 'SVA Black Pepper Oil 4oz'},
-    {'ASIN': 'B07MB11J1L', 'Product_Name': 'SIVA Lavender 40/42 Oil 32oz'},
-    {'ASIN': 'B07MV1F6C5', 'Product_Name': 'SVA Cherry Kernel Oil 4oz'},
-    {'ASIN': 'B07N7BM5ZS', 'Product_Name': 'SVA Juniper Berry Oil 4oz'},
-    {'ASIN': 'B07J1K2R2Y', 'Product_Name': 'SVA Frankincense Sacra Oil 1oz'},
-    {'ASIN': 'B07MB7KW1Q', 'Product_Name': 'SVA Camphor oil 32oz'},
-    {'ASIN': 'B07Q85R78Y', 'Product_Name': 'SVA Brahmi Oil 8oz (US)'},
-    {'ASIN': 'B07J1BHVYT', 'Product_Name': 'SVA Frankincense Sacra Oil 10ml'},
-    {'ASIN': 'B07MKYPN1Z', 'Product_Name': 'SVA Brahmi Oil 32oz'},
-    {'ASIN': 'B07ZM5XPMC', 'Product_Name': 'SVA Macadamia Oil 4oz (US)'},
-    {'ASIN': 'B07DVQT8BM', 'Product_Name': 'SVA Cedarwood Essential Oil 4oz'},
-    {'ASIN': 'B072Q22P7Q', 'Product_Name': 'SVA Jojoba Oil 4oz (US)'},
-    {'ASIN': 'B07N8XW62L', 'Product_Name': 'SVA Sweet Basil Oil 4oz'},
-    {'ASIN': 'B09TZRP8YM', 'Product_Name': 'SIVA Carrot Seed Oil 4 Oz'},
-    {'ASIN': 'B07MF74H7F', 'Product_Name': 'SVA Tamanu Oil 32 Oz (US)'},
-    {'ASIN': 'B07DTMDJHP', 'Product_Name': 'SVA Frankincense Carterii Oil 10 ml'},
-    {'ASIN': 'B0DH2L7Z1P', 'Product_Name': 'SVA Lemongrass Oil Organic 16 Oz (US)'},
-    {'ASIN': 'B0DH2N9R8X', 'Product_Name': 'SVA Eucalyptus Oil Organic 16 Oz (US)'},
-    {'ASIN': 'B0DH2NVJT9', 'Product_Name': 'SVA Frankincense Serrata Oil Organic 16 Oz (US)'},
-    {'ASIN': 'B0D2XHBM2N', 'Product_Name': 'Siva Peppermint Oil 16 Oz (US)'},
-    {'ASIN': 'B0DH2LJV1R', 'Product_Name': 'SVA Clove Bud Oil Organic 16 oz (US)'},
-    {'ASIN': 'B0D2X7G32Z', 'Product_Name': 'Siva Lavender Oil 16 Oz (US)'},
-    {'ASIN': 'B0DHC6MT9S', 'Product_Name': 'Siva Lemon Oil – 16 Oz (US)'},
-    {'ASIN': 'B0DHH2Q6GM', 'Product_Name': 'Siva Camphor Oil – 16 Oz (US)'},
-    {'ASIN': 'B0DHGWZLQX', 'Product_Name': 'Siva Tea Tree Oil – 16 Oz (US)'},
-    {'ASIN': 'B0DH2J1TLG', 'Product_Name': 'SVA Oregano Oil – 16 Oz (US)'}
 ]
 )
         
@@ -1266,7 +1285,42 @@ def main():
                         st.success(f"Targets for {month} saved successfully!")
                 else:
                     st.dataframe(st.session_state.editable_data[['ASIN', 'Product_Name', 'Units', 'Price', 'Total']])
-     
+
+            with tabs[9]:  # Ensure tab indexing is correct
+                st.header("US Products Shipment Planning")
+
+                if not us_products_data.empty:
+                    # st.subheader("Fetched AWD, Backstock, and Upcoming Orders for US Products")
+                    # st.dataframe(us_products_data)
+
+                    target_date = st.date_input("Select Target Date for Shipment Planning",
+                                                value=datetime.now() + timedelta(days=30),
+                                                min_value=datetime.now(),
+                                                key="us_target_date")
+
+                    us_shipment_plan = calculate_us_shipment_plan(filtered_inventory_status, us_products_data, target_date)
+
+                    st.subheader("Updated Shipment Plan (US Products)")
+                    display_columns =[
+                    'ASIN', 'Product Name', 'Current Inventory', 
+                    'Daily_Run_Rate', 'Expected_Usage', 'Total Upcoming Shipment', 
+                    'AWD','Backstock',"Upcoming Orders",'Required Inventory(AWD+BS+ORDERS)']
+                    st.dataframe(us_shipment_plan[display_columns])
+
+
+                    # # Visualization
+                    # fig_us_shipment = px.bar(us_shipment_plan, x='Product Name', y='Final Required Shipment',
+                    #                          title='Updated Required Shipment Quantities (US Products)')
+                    # fig_us_shipment.update_layout(xaxis_tickangle=-45)
+                    # st.plotly_chart(fig_us_shipment, use_container_width=True)
+                    
+                    # Download option
+                    st.download_button(label="Download US Shipment Plan",
+                                       data=us_shipment_plan.to_csv(index=False),
+                                       file_name="us_shipment_plan.csv",
+                                       mime="text/csv")
+                else:
+                    st.warning("No US Products data found in the uploaded file.")
 
         except Exception as e:
             st.error("Error processing data")
